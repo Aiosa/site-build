@@ -1,10 +1,14 @@
 <h2>Flexible Pyramids and Rendering Controls</h2>
 
 <p>
-    Real-world data often does not follow this assumption: servers expose arbitrary
-    scales, scientific formats may have custom level layouts, or optimize storage
-    by removing certain levels, and synthetic
-    sources may want a single very large tile at the top of the pyramid.
+    Many rendering systems like OpenSeadragon usually force powers-of-two pyramids,
+    sometimes even with square tiles. Each level is two times bigger/smaller than the
+    previous/next, and tiles are 256 or 521-pixel sized squares. While this is
+    simple to reason about, it poses a significant limitation. Real-world data often does not
+    follow this assumption: servers may expose
+    arbitrary scales, scientific formats may use custom level layouts or remove
+    certain levels to optimize storage, and synthetic sources may want a single
+    very large tile at the top of the pyramid.
 </p>
 
 <p>
@@ -42,12 +46,12 @@
 
 <div class="description">
     <h3>Custom Per-Level Scales and Tile Sizes</h3>
-    <p>
-        For an irregular pyramid you typically override three methods on
-        your <code>TileSource</code>:
-    </p>
 </div>
-<ul>
+<p>
+    For an irregular pyramid you typically override three methods on
+    your <code>TileSource</code>:
+</p>
+<ul style="list-style-type: disc">
     <li>
         <code>getLevelScale(level)</code> — return the scale of a level
         relative to the native (max) resolution. The default returns
@@ -82,7 +86,7 @@
     </div>
     <div id="example-flexible-pyramid" class="openseadragon"></div>
     <p>
-        The viewer below is fed by a synthetic <code>TileSource</code> that
+        The viewer above is fed by a synthetic <code>TileSource</code> that
         renders each tile with a coloured gradient and prints the level,
         coordinates, scale and tile size onto it. The pyramid uses
         non-power-of-two scales and a different tile size on every level.
@@ -280,7 +284,7 @@ OpenSeadragon({
 <p>
     A few subtleties worth knowing:
 </p>
-<ul>
+<ul style="list-style-type: disc">
     <li>
         <b>Memoization</b>. The default <code>getLevelScale</code> caches
         its results by replacing itself with a closure over a precomputed
@@ -290,17 +294,20 @@ OpenSeadragon({
         completely replaces the base behaviour.
     </li>
     <li>
-        <b>Level picking is closest-to-native</b>. The renderer iterates
-        through all levels and chooses the one whose pixel ratio at the
-        current zoom is closest to <code>1.0</code>. This works for any
-        pyramid shape, not only powers of two, and is what makes the
-        custom-scale demo above feel correct as you zoom.
+        <b>Level picking uses an eligible range, not a single nearest level</b>.
+        For the current zoom, the renderer considers the interval of levels
+        that can contribute useful detail, applies <code>minPixelRatio</code>
+        when deciding how far down the pyramid it may go, and may draw or
+        blend multiple levels until the viewport is fully covered. This works
+        for irregular pyramid shapes as well as power-of-two pyramids, and is
+        what makes the custom-scale demo above feel correct as you zoom.
     </li>
     <li>
-        <b>A single-tile cutoff level is always rendered</b>. OpenSeadragon
-        precomputes the lowest level that covers the viewport in a single
-        tile and always keeps it loaded as a fallback, so you should never
-        see an entirely empty viewport during a deep zoom on a sparse pyramid.
+        <b>A single-tile cutoff level can act as a fallback</b>. OpenSeadragon
+        identifies the highest level that fits in a single tile. If that
+        level has been loaded, it can be used as a fallback while zooming
+        out, but it is not guaranteed to remain loaded or to always prevent
+        an empty viewport on a sparse pyramid.
     </li>
 </ul>
 
@@ -317,13 +324,12 @@ OpenSeadragon({
 
 <h4><code>immediateRender</code> <small>(default: <code>false</code>)</small></h4>
 <p>
-    By default, OpenSeadragon walks up the pyramid from a low resolution to
-    the closest level, producing the familiar blurry-to-sharp progression.
-    Setting <code>immediateRender: true</code> skips that progression and
-    renders the closest level directly. This avoids transient lower-quality
-    frames at the cost of leaving the viewport blank for a moment if the
-    target level is not yet cached. <b>Recommended for mobile devices</b>
-    where intermediate-level rendering is expensive.
+    By default, OpenSeadragon walks up the pyramid from a low resolution
+    (the biggest single tile that covers the whole image) to the closest level,
+    producing the familiar blurry-to-sharp progression. Setting immediateRender: true
+    skips that progression and renders the <code>minPixelRatio</code> matching level directly.
+    This avoids transient lower-resolution frames at the cost of a visible "patchwork"
+    effect as the tiles come in. This can be worthwhile on mobile devices to reduce data transfer.
 </p>
 
 <h4><code>minPixelRatio</code> <small>(default: <code>0.5</code>)</small></h4>
@@ -333,14 +339,15 @@ OpenSeadragon({
     <code>0.5</code> means OpenSeadragon will pre-fetch one level above the
     target so that zooming in reveals already-loaded sharper data.
 </p>
-<ul>
+<ul style="list-style-type: disc">
     <li>Raise to <code>1.0</code> to fetch roughly at the screen pixel ratio
         and reduce bandwidth.</li>
     <li>Raise to <code>1.5</code>+ for low-bandwidth or mobile use; you may
         see slightly upsampled content during fast zoom but far fewer tile
         requests.</li>
-    <li>The viewer always keeps the lowest level (<code>minLevel</code>)
-        loaded so the image never disappears.</li>
+    <li>When lower-resolution levels are already loaded (especially
+        single-tile fallback levels), OpenSeadragon can use them
+        temporarily while sharper tiles are still loading.</li>
 </ul>
 
 <h4><code>discardLevelsBelowDownsampleRatio</code> <small>(default: <code>1</code>)</small></h4>
@@ -355,7 +362,7 @@ OpenSeadragon({
     a ratio of <code>2</code> will collapse the <code>0.1/0.12</code> pair
     down to a single chosen level.
 </p>
-<ul>
+<ul style="list-style-type: disc">
     <li>
         Set globally on the viewer:
         <pre>OpenSeadragon({ /* ... */ discardLevelsBelowDownsampleRatio: 2 });</pre>
@@ -451,13 +458,14 @@ function buildViewer(opts) {
             tileSizes.push(256);
         }
 
+        const minPixelRatio = parseFloat(document.getElementById('dlbdr-mpr').value);
         current = OpenSeadragon({
             id: 'example-discard-levels',
             prefixUrl: '/openseadragon/images/',
             showNavigator: false,
             blendTime: 0.1,
             immediateRender: document.getElementById('dlbdr-immediate').checked,
-            minPixelRatio: parseFloat(document.getElementById('dlbdr-mpr').value) || 0.5,
+            minPixelRatio: isNaN(minPixelRatio) ? 0.5 : minPixelRatio,
             discardLevelsBelowDownsampleRatio: rebuild.ratio,
             tileSources: new FlexiblePyramidSource({
                 width: 4096, height: 4096,
@@ -493,7 +501,7 @@ function buildViewer(opts) {
     A practical recipe for a custom pyramid that performs well across
     devices:
 </p>
-<ul>
+<ul style="list-style-type: disc">
     <li>
         Implement <code>getLevelScale</code>, <code>getTileWidth</code>,
         <code>getTileHeight</code> to describe the pyramid faithfully —
@@ -506,7 +514,7 @@ function buildViewer(opts) {
         consumers do not have to know the quirk.
     </li>
     <li>
-        For mobile or low-bandwidth deployments, set
+        For low-bandwidth deployments, set
         <code>immediateRender: true</code> and raise
         <code>minPixelRatio</code> to <code>1.0</code> (or a touch above)
         — fewer requests, no intermediate-quality renders.
@@ -515,11 +523,6 @@ function buildViewer(opts) {
         For desktop with fast networks, the defaults
         (<code>immediateRender: false</code>,
         <code>minPixelRatio: 0.5</code>) give the smoothest user experience.
-    </li>
-    <li>
-        Use <code>alwaysBlend: true</code> only if you have raised
-        <code>blendTime</code> for stylistic reasons and want the cross-fade
-        to be guaranteed.
     </li>
 </ul>
 
